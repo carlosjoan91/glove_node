@@ -1,88 +1,45 @@
 #!/usr/bin/env python
 import rospy
 import serial
-from std_msgs.msg import Int32
-from numl_val_msgs.msg import HandPoseTrajectoryRosMessage
-from ihmc_msgs.msg import OneDoFJointTrajectoryRosMessage
-from ihmc_msgs.msg import TrajectoryPoint1DRosMessage
+from sensor_msgs.msg import JointState
+
+
+def convert_range(number):
+	if number > 600: #Fully closed
+		n = 600
+	elif number < 350:
+		n = 350 #Fully open
+	else n = number
+	n = 600 - n ##Change value to the 0-250 range and invert its direction (it now grows as you close the fist)
+	return n * (3.0/250.0) ##Change the value to the 0.0 to 3.0 range to make it similar to the robot's hands range
 
 def glovenode():
 	unid = 1
-	ser = serial.Serial('/dev/ttyUSB0')
+	ser1 = serial.Serial('/dev/ttyUSB0') ##TODO: Make this a parameter/argument probably
+	ser2 = serial.Serial('/dev/ttyUSB1') ##TODO: Wait for the serial device instead of erroring out
 	rospy.init_node('glove_node', anonymous=True)
 	rate = rospy.Rate(100)
-	pub = rospy.Publisher('/arm_control', HandPoseTrajectoryRosMessage, queue_size=1)
-	msg = HandPoseTrajectoryRosMessage()
-	msg.robot_side = 1
-	msg.execution_mode = 0
-	msg.desired_pose = 0
-	msg.previous_message_id = unid - 1
-	msg.homeAllForearmJoints = True
-	troll = OneDoFJointTrajectoryRosMessage()
-	tprox = OneDoFJointTrajectoryRosMessage()
-	tdist = OneDoFJointTrajectoryRosMessage()
-	index = OneDoFJointTrajectoryRosMessage()
-	middle = OneDoFJointTrajectoryRosMessage()
-	pinky = OneDoFJointTrajectoryRosMessage()
-	fingers_list = [troll, tprox, tdist, index, middle, pinky]
-	msg.hand_joint_trajectory_messages = fingers_list
-	null_point1d = TrajectoryPoint1DRosMessage()
-	null_point1d.position = 0.5
-
-	null_onedof_1 = OneDoFJointTrajectoryRosMessage()
-	null_onedof_2 = OneDoFJointTrajectoryRosMessage()
-	null_onedof_3 = OneDoFJointTrajectoryRosMessage()
-	msg.forearm_joint_trajectory_messages = [null_onedof_1, null_onedof_2, null_onedof_3]
-
-	for finger in fingers_list:
-		finger.trajectory_points.append(null_point1d)
+	pub = rospy.Publisher('/glove_status', JointState, queue_size=1)
+	
 	while not rospy.is_shutdown():
-		msg.unique_id = unid
-		lastline = ser.readline()
-		value_list = [int(x) for x in lastline.split(',')]
-		clamped_values = []
-		for val in value_list:
-			new_val = val
-			if val < 350:
-				new_val = 350
-			if val > 600:
-				new_val = 600
-			new_val -= 350
-			new_val = 250 - new_val
-			clamped_values.append(new_val)
-		print clamped_values
-		rin = clamped_values[0]
-		mid = clamped_values[1]
-		ind = clamped_values[2]
-		thumb = clamped_values[3]
-		#print thumb
-		rin = (rin * 2.7/250) + 0.3
-		mid = (mid * 2.7/250) + 0.3
-		ind = (ind * 2.7/250) + 0.3
-		thumb = (thumb * 1.7/250) + 0.3
+		lastline = (ser1.readline()).split(',')
+		if lastline[0] == 'L':
+			left_value_list = [convert_range(int(x)) for x in lastline[1:]]
+		elif lastline[0] == 'R':
+			right_value_list = [convert_range(int(x)) for x in lastline[1:]]
 
-		pinky_point1d = TrajectoryPoint1DRosMessage()
-		pinky_point1d.position = rin
-		pinky.trajectory_points = [pinky_point1d] 
-
-		middle_point1d = TrajectoryPoint1DRosMessage()
-		middle_point1d.position = mid
-		middle.trajectory_points = [middle_point1d] 
-
-		index_point1d = TrajectoryPoint1DRosMessage()
-		index_point1d.position = ind
-		index.trajectory_points = [index_point1d] 
-
-		thumb_point1d = TrajectoryPoint1DRosMessage()
-		thumb_point1d.position = thumb
-		tdist.trajectory_points = [thumb_point1d] 
-
-		thumb_roll1d = TrajectoryPoint1DRosMessage()
-		thumb_roll1d.position = 1.5
-		troll.trajectory_points = [thumb_roll1d] 
+		lastline = (ser2.readline()).split(',')
+		if lastline[0] == 'L':
+			left_value_list = [convert_range(int(x)) for x in lastline[1:]]
+		elif lastline[0] == 'R':
+			right_value_list = [convert_range(int(x)) for x in lastline[1:]]
+		
+		msg = JointState()
+		msg.header.stamp = rospy.Time.now()
+		msg.name = ['leftPinky', 'leftRing', 'leftMiddle', 'leftIndex', 'leftThumb', 'rightPinky', 'rightRing', 'rightMiddle', 'rightIndex', 'rightThumb']
+		msg.position = left_value_list + right_value_list
 
 		pub.publish(msg)
-		unid = unid + 1
 		rate.sleep()
 
 if __name__ == '__main__':
